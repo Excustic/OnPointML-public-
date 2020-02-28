@@ -27,6 +27,7 @@ descartes==1.1.0
 docutils==0.15.2
 entrypoints==0.3
 Fiona==1.8.11
+Flask==1.1.1
 gast==0.2.2
 GDAL==3.0.2
 geographiclib==1.50
@@ -46,6 +47,7 @@ ipython==7.12.0
 ipython-genutils==0.2.0
 ipywidgets==7.5.1
 isort==4.3.20
+itsdangerous==1.1.0
 jedi==0.16.0
 Jinja2==2.11.1
 joblib==0.14.1
