@@ -23,6 +23,7 @@ from sklearn.cluster import DBSCAN, KMeans, MeanShift, OPTICS, cluster_optics_db
 # Transform normal timestamp to special ml features
 from sklearn.neighbors._ball_tree import BallTree
 
+filename = "extracted_data.csv"
 
 def transfrom_X(Time):
     year, month, day_of_week, hour, minute, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter = ([] for i in
@@ -53,6 +54,21 @@ def transfrom_X(Time):
     else:
         year = (year - year_min) / (year_max - year_min)
     return list(zip(year, day_of_week, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter))
+
+def transfrom_TimePoint(Time):
+    current_date = dt.datetime.utcfromtimestamp(Time / 1000).strftime("%Y/%m/%d %H:%M")
+    yymmdd = current_date.split(" ")[0]
+    hhmm = current_date.split(" ")[1]
+    year = int(yymmdd.split("/")[0])
+    month = int(yymmdd.split("/")[1])
+    day_of_week = dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(Time/1000)) # monday - 1 , sunday - 7
+    hour = int(hhmm.split(":")[0])
+    minute = int(hhmm.split(":")[1])
+    (hoursin, hourcos) = circular_hour(hour, minute)
+    (monthsin, monthcos) = circular_month(month)
+    is_weekend = 1 if (day_of_week == 5 or day_of_week == 6) else 0
+    season = (np.ceil(month / 4))
+    return year, day_of_week, hoursin, hourcos, monthsin, monthcos, is_weekend, season
 
 
 def transform_Y(coords):
@@ -143,7 +159,7 @@ def Balltree_CLUSTER(coords):
 def HDBSCAN_CLUSTER(coords):
     tracemalloc.start()
     start_time = time.time()
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=700, min_samples=300, algorithm='prims_kdtree', core_dist_n_jobs=-2)
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=300, min_samples=int(coords.shape[0]/100), algorithm='prims_kdtree', core_dist_n_jobs=-2)
     clusterer.fit(coords)
     labels = clusterer.labels_
     current, peak = tracemalloc.get_traced_memory()
@@ -164,9 +180,10 @@ def HDBSCAN_CLUSTER(coords):
     num_clusters = len(set(clusterer.labels_))
     clusters = pd.Series([coords[labels == n] for n in range(num_clusters-1)])
     centers = clusters.map(get_centermost_point).array
-    centers = np.array([[a[0],a[1]] for a in centers])
+    centers = np.array([[a[0], a[1]] for a in centers])
     np.savetxt("HDBSCAN_CLUSTER_CENTROIDS.csv", centers, fmt="%10.8f", delimiter=',')
     print(centers)
+    return labels
 
 
 def DBSCAN_CLUSTER(coords):
@@ -302,64 +319,66 @@ def kmeans_cluster(coords, k):
     plt.scatter(coords[:, 1], coords[:, 0], s=2, c='black')
     plt.show()
 
-data = pd.read_csv("Original_data.csv", sep=",", nrows=300)
+def prepare_data(path):
+    data = pd.read_csv("Original_data.csv", sep=",")
 
-data = data[["Lat", "Long", "Timestamp"]]
+    data = data[["Lat", "Long", "Timestamp"]][-40000:]
 
-Time = data['Timestamp']
-coords = np.column_stack([data["Lat"], data["Long"]])
-OPTICS_CLUSTER(coords)
-
-for i in range(4):
-    print("Number of Data points - ", str(10 ** (i + 2)))
-    data = pd.read_csv("Original_data.csv", sep=",", nrows=10 ** (i + 2))
-
-    data = data[["Lat", "Long", "Timestamp"]]
 
     Time = data['Timestamp']
     coords = np.column_stack([data["Lat"], data["Long"]])
-    # try:
-    #     transform_Y(coords)
-    # except Exception as e:
-    #     print(e)
-    print("-----------------------\nKMeans: ", "k: 5")
-    kmeans_cluster(coords, 5)
-    #print("-----------------------\nMeanShift: ")
-    #CLUSTER_MEANSHIFT(coords)
-    print("-----------------------\nGeohash-freq: ", "threshold:0.12, precision:7")
-    GEOHASH_CLUSTER(coords, 0.12, 7)
-    print("-----------------------\nDBSCAN")
-    DBSCAN_CLUSTER(coords)
-    print("-----------------------\nHDBSCAN: ")
-    HDBSCAN_CLUSTER(coords)
+    #OPTICS_CLUSTER(coords)
 
-X_Time = transfrom_X(Time)
+    # for i in range(4):
+    #     print("Number of Data points - ", str(10 ** (i + 2)))
+    #     data = pd.read_csv("Original_data.csv", sep=",", nrows=10 ** (i + 2))
+    #
+    #     data = data[["Lat", "Long", "Timestamp"]]
+    #
+    #     Time = data['Timestamp']
+    #     coords = np.column_stack([data["Lat"], data["Long"]])
+    #     # try:
+    #     #     transform_Y(coords)
+    #     # except Exception as e:
+    #     #     print(e)
+    #     print("-----------------------\nKMeans: ", "k: 5")
+    #     kmeans_cluster(coords, 5)
+    #     #print("-----------------------\nMeanShift: ")
+    #     #CLUSTER_MEANSHIFT(coords)
+    #     print("-----------------------\nGeohash-freq: ", "threshold:0.12, precision:7")
+    #     GEOHASH_CLUSTER(coords, 0.12, 7)
+    #     print("-----------------------\nDBSCAN")
+    #     DBSCAN_CLUSTER(coords)
+    #     print("-----------------------\nHDBSCAN: ")
+    #     HDBSCAN_CLUSTER(coords)
 
-sys.exit("cool")
+    X_Time = transfrom_X(Time)
 
-X_Time = np.array(X_Time)
-y = np.array(y)
-Filtered_X, Filtered_Y = filter_data(X_Time, y)
-Filtered_X = np.array(Filtered_X)
-Filtered_Y = np.array(Filtered_Y)
-np.set_printoptions(suppress=True)
-transformed_data = np.column_stack([Filtered_X, Filtered_Y])
-header_str = "year,day_of_week,hour_sin,hour_cos,month_sin,month_cos,is_weekend,season,result"
-format_str = []
-for i in range(Filtered_X.shape[1]):
-    format_str.append("%10.8f")
-format_str.append("%s")
-header_str_arr = header_str.split(',')
-dtype = []
-for i in range(len(header_str_arr) - 1):
-    dtype.append((header_str_arr[i], float))
-dtype.append((header_str_arr[i + 1], 'U7'))
-ab = np.zeros(Filtered_Y.size, dtype=dtype)
-for i in range(len(header_str_arr)):
-    ab[header_str_arr[i]] = transformed_data[:, i]
-np.savetxt("TransformedData.csv", ab, delimiter=',', fmt=format_str, header=header_str, comments='')
 
-newdata = pd.read_csv("TransformedData.csv", sep=",")
-hourcos = newdata["hour_cos"]
-result = newdata["result"]
-print(type(hourcos[0]), type(result[0]))
+    X_Time = np.array(X_Time)
+    y = np.array(coords)
+    Filtered_X, Filtered_Y = filter_data(X_Time, y)
+    Filtered_X = np.array(Filtered_X)
+    Filtered_Y = np.array(Filtered_Y)
+    label=HDBSCAN_CLUSTER(Filtered_Y)
+    Filtered_X = Filtered_X[label != -1]
+    Filtered_Y = Filtered_Y[label != -1]
+    label = label[label != -1]
+    np.set_printoptions(suppress=True)
+    transformed_data = np.column_stack([Filtered_X, Filtered_Y, label])
+    header_str = "year,day_of_week,hour_sin,hour_cos,month_sin,month_cos,is_weekend,season,lat,long,label"
+    format_str = []
+    for i in range(transformed_data.shape[1]-1):
+        format_str.append("%10.8f")
+    format_str.append("%d")
+    header_str_arr = header_str.split(',')
+    dtype = []
+    for i in range(len(header_str_arr) - 1):
+        dtype.append((header_str_arr[i], float))
+    dtype.append((header_str_arr[i + 1], int))
+    ab = np.zeros(Filtered_Y.shape[0], dtype=dtype)
+    for i in range(len(header_str_arr)):
+        ab[header_str_arr[i]] = transformed_data[:, i]
+    np.savetxt(path/filename, ab, delimiter=',', fmt=format_str, header=header_str, comments='')
+
+
