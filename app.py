@@ -1,5 +1,7 @@
 import threading
 from pathlib import Path
+from flask_ngrok import run_with_ngrok
+import pandas as pd
 from flask import Flask, jsonify, request
 from os import path
 import logging
@@ -10,6 +12,7 @@ from data_extractor import filename
 from Models import DeepModel, NNModel, KNN
 
 app = Flask(__name__)
+run_with_ngrok(app)
 OnPointAPI_URL = "https://onpoint-backend.herokuapp.com/api/"
 getHist = "locationhistories/getLocationHist/"
 client = http3.AsyncClient()
@@ -20,7 +23,7 @@ def hello():
     return "OnPoint ML Engine"
 
 
-def getHistory(userId):
+async def getHistory(userId):
     keys = "?order=start&count=-1"
     req = OnPointAPI_URL+getHist+userId+keys
     res = await client.get(req)
@@ -36,7 +39,7 @@ def userExists(userId):
         thread.start()
         return False*3
     else:
-        return True, path.exists(dir / filename), path.exists(dir / "defaultModel.json")
+        return True, path.exists(dir / filename), path.exists(dir / "accuracies.csv")
 
 
 
@@ -46,12 +49,21 @@ def predict(userId):
     logging.debug("predict request for user: ", userId)
     timestamp = request.args.get('timestamp')
     dir = Path("/users/"+userId+"/")
-    if not userExists(userId)[0]:
+    arr = userExists(userId)
+    if not arr[0]:
         idt.prepare_data(dir)
-    if not userExists(userId)[1]:
+    if not arr[1]:
         KNN.train_model()
         DeepModel.train_model()
         NNModel.train_model()
+    resJson = None
+    df = pd.read_csv(dir/"accuracies.csv")
+    if df['KNN']>df['NN'] and df['KNN']>df['DEEP']:
+        resJson = KNN.predict_model(dir, timestamp)
+    elif df['NN']>df['KNN'] and df['NN']>df['DEEP']:
+        NNModel.predict_model(dir, timestamp)
+    else:
+        DeepModel.predict_model(dir, timestamp)
 
 
 if __name__ == '__main__':

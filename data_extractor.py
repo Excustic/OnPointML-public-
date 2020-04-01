@@ -156,7 +156,7 @@ def Balltree_CLUSTER(coords):
     results = tree.query_radius(test_points, r=test_radius / earth_radius, return_distance=True)
     print(results)
     return results
-def HDBSCAN_CLUSTER(coords):
+def HDBSCAN_CLUSTER(coords, path):
     tracemalloc.start()
     start_time = time.time()
     clusterer = hdbscan.HDBSCAN(min_cluster_size=300, min_samples=int(coords.shape[0]/100), algorithm='prims_kdtree', core_dist_n_jobs=-2)
@@ -360,7 +360,7 @@ def prepare_data(path):
     Filtered_X, Filtered_Y = filter_data(X_Time, y)
     Filtered_X = np.array(Filtered_X)
     Filtered_Y = np.array(Filtered_Y)
-    label=HDBSCAN_CLUSTER(Filtered_Y)
+    label=HDBSCAN_CLUSTER(Filtered_Y, path)
     Filtered_X = Filtered_X[label != -1]
     Filtered_Y = Filtered_Y[label != -1]
     label = label[label != -1]

@@ -76,6 +76,7 @@ def train_model(path):
 
 def predict_model(path, timestamp):
     # Opening a saved model
+    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
 
     model = keras.models.load_model(path/"NNMODEL")
 

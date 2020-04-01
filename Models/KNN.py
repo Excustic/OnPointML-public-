@@ -64,6 +64,8 @@ def train_model(path):
 
 
 def predict_model(path, timestamp):
+    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+
     model = pickle.load(open(path+"\\KNNModel.pickle", 'rb'))
     result = model.predict(transfrom_TimePoint(timestamp))
     return result
