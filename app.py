@@ -1,18 +1,23 @@
+import errno
+import json
+import os
+import sys
 import threading
-from pathlib import Path
+import time
 from flask_ngrok import run_with_ngrok
 import pandas as pd
 from flask import Flask, jsonify, request
 from os import path
+from os.path import join
 import logging
 import http3
 import JSONtoCSV as jtc
-import data_extractor as idt
-from data_extractor import filename
+from data_extractor import file_extracted_data, file_accuracies, prepare_data
 from Models import DeepModel, NNModel, KNN
 
 app = Flask(__name__)
 run_with_ngrok(app)
+ngrok_url = ""
 OnPointAPI_URL = "https://onpoint-backend.herokuapp.com/api/"
 getHist = "locationhistories/getLocationHist/"
 client = http3.AsyncClient()
@@ -23,48 +28,81 @@ def hello():
     return "OnPoint ML Engine"
 
 
-async def getHistory(userId):
-    keys = "?order=start&count=-1"
-    req = OnPointAPI_URL+getHist+userId+keys
-    res = await client.get(req)
-    hist = jsonify(res.text)
-    filepath = Path("/users/"+userId+"/history.csv")
-    jtc.convert(hist, filepath)
+def getHistory(userId):
+    # keys = "?order=start&count=-1"
+    # req = OnPointAPI_URL + getHist + userId + keys
+    # res = await client.get(req)
+    # hist = jsonify(res)
+    file_path = join("users", userId, "history.csv")
+    with open(join(sys.path[0], 'recycle_bin', 'mike_hist.json')) as f:
+        hist = f
+        jtc.convert(hist, file_path)
 
-def userExists(userId):
-    dir = Path("/users/"+userId+"/")
-    if not path.exists(dir):
-        thread = threading.Thread(target=getHistory, args=(userId))
-        thread.daemon = True
-        thread.start()
-        return False*3
+
+def user_exists(userId):
+    file_dir = join(sys.path[0], "users")
+    if not path.exists(file_dir):
+        try:
+            os.mkdir(file_dir)
+            file_dir = join(file_dir, "uzi")
+            os.mkdir(file_dir)
+            getHistory(userId)
+        except OSError as exc:
+            if exc.errno != errno.EEXIST:
+                raise
+        else:
+            print("Successfully created the directory %s " % file_dir)
+
+        return False, False
     else:
-        return True, path.exists(dir / filename), path.exists(dir / "accuracies.csv")
+        return True, path.exists(join(file_dir, file_extracted_data))
 
 
+def setMLurl():
+    logging.debug("sending URL")
+    os.system("curl  http://localhost:4040/api/tunnels > tunnels.json")
+
+    with open('tunnels.json') as data_file:
+        data_json = json.load(data_file)
+
+    msg = "|"
+    for i in data_json['tunnels']:
+        msg = msg + i['public_url'] + "|"
+    http3.post(OnPointAPI_URL + "prediction/setMLurl?key=" + str(msg.split("|")[1]))
+    pass
 
 
 @app.route('/user/<string:userId>/predict', methods=['GET', 'POST'])
-def predict(userId):
+def predict(userId, timestamp):
     logging.debug("predict request for user: ", userId)
-    timestamp = request.args.get('timestamp')
-    dir = Path("/users/"+userId+"/")
-    arr = userExists(userId)
+    # timestamp = request.args.get('timestamp')
+    file_dir = join(sys.path[0], "users", userId)
+    arr = user_exists(userId)
     if not arr[0]:
-        idt.prepare_data(dir)
+        prepare_data(file_dir)
     if not arr[1]:
-        KNN.train_model()
-        DeepModel.train_model()
-        NNModel.train_model()
-    resJson = None
-    df = pd.read_csv(dir/"accuracies.csv")
-    if df['KNN']>df['NN'] and df['KNN']>df['DEEP']:
-        resJson = KNN.predict_model(dir, timestamp)
-    elif df['NN']>df['KNN'] and df['NN']>df['DEEP']:
-        NNModel.predict_model(dir, timestamp)
-    else:
-        DeepModel.predict_model(dir, timestamp)
+        KNN.train_model(file_dir)
+        # DeepModel.train_model(file_dir)
+        NNModel.train_model(file_dir)
+    df = pd.read_csv(join(file_dir, file_accuracies))
+    # if df['KNN'] > df['NN'] and df['KNN'] > df['DEEP']:
+    #     points = KNN.predict_model(file_dir, timestamp)
+    # elif df['NN'] > df['KNN'] and df['NN'] > df['DEEP']:
+    #     points = NNModel.predict_model(file_dir, timestamp)
+    # else:
+    #     points = DeepModel.predict_model(file_dir, timestamp)
+    points = KNN.predict_model(file_dir, timestamp)
+    res_json = {'userId':userId, 'points':points, 'timestamp':timestamp}
+    print(str(res_json))
+    return res_json
 
 
 if __name__ == '__main__':
-    app.run()
+    t = threading.Thread(target=app.run, args=())
+    t.start()
+    b = False
+    while not b:
+        if http3.get("http://localhost:4040").status_code == 200:
+            b = True
+            setMLurl()
+        time.sleep(0.5)

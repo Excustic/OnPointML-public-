@@ -4,7 +4,7 @@ from keras import Sequential
 from keras.layers import CuDNNLSTM, Dropout, Dense, LSTM
 from sklearn import preprocessing
 import numpy as np
-from data_extractor import filename
+from data_extractor import file_extracted_data
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 config = tf.compat.v1.ConfigProto(gpu_options=
@@ -16,9 +16,9 @@ session = tf.compat.v1.Session(config=config)
 tf.compat.v1.keras.backend.set_session(session)
 
 def train_model():
-    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+    centroids = pd.read_csv("HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
 
-    data = pd.read_csv(filename, sep=",")
+    data = pd.read_csv(file_extracted_data, sep=",")
 
     X_Time = data[
         ["year", "day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "season"]].to_numpy()
@@ -57,6 +57,6 @@ def train_model():
 
 
 def predict_model(path, timestamp):
-    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+    centroids = pd.read_csv("HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
 
     print(path, timestamp)

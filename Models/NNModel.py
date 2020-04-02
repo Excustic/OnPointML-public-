@@ -1,18 +1,14 @@
+import os
+from os.path import join
 import tensorflow as tf
 from tensorflow import keras
-import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn import preprocessing
-from collections import Counter
-import time
-import datetime as dt
-from data_extractor import filename, transfrom_TimePoint
-import pickle
-import pygeohash as gh
+from data_extractor import file_extracted_data, extract_single, file_cluster_centroids, file_accuracies
 import sys
 
+folder_name = "NNMODEL"
 config = tf.compat.v1.ConfigProto(gpu_options=
                                   tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
                                   # device_count = {'GPU': 1}
@@ -21,16 +17,16 @@ config.gpu_options.allow_growth = True
 session = tf.compat.v1.Session(config=config)
 tf.compat.v1.keras.backend.set_session(session)
 
+
 def train_model(path):
-    data = pd.read_csv(filename, sep=",")
-    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+    # preparing data for model
+
+    data = pd.read_csv(os.path.join(sys.path[0], path, file_extracted_data), sep=",")
+    centroids = pd.read_csv(os.path.join(path, file_cluster_centroids)).to_numpy()
 
     X_Time = data[
-        ["year", "day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "season"]].to_numpy()
+        ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
     y = data[["label"]].to_numpy()
-    le = preprocessing.LabelEncoder()
-    # cls = le.fit_transform(list(y))
-    # y = np.array(list(cls))
 
     x_train, x_test, y_train, y_test = train_test_split(X_Time, y, test_size=0.1)
     print(type(x_train), type(X_Time))
@@ -43,7 +39,6 @@ def train_model(path):
     print()
     output_layer_size = len(list(set(y.flatten())))
     dense_layer_size = int(np.mean([input_layer_size, output_layer_size]))
-    print("input_size: ", input_layer_size, "\nout_size: ", output_layer_size, "\ndense_size: ", dense_layer_size)
 
     # Model training and saving
 
@@ -60,25 +55,31 @@ def train_model(path):
         test_loss, test_acc = model.evaluate(x_test, y_test)
         print(i, "|accuracy: ", test_acc)
 
-        prediction = model.predict(x_test)
         if test_acc > max_acc:
             max_acc = test_acc
-            model.save(path/"NNMODEL", save_format='tf')
+            model.save(join(path, folder_name), save_format='tf')
     try:
-        with open('accuracies.csv', "wb") as f2:
+        with open(join(sys.path[0], path, file_accuracies), "wb") as f2:
             df = pd.read_csv(f2, sep=",")
             df['NN'] = max_acc
-            df.to_csv(path/'accuracies.csv')
+            df.to_csv(join(path, file_accuracies))
     except:
         d = [{'NN': max_acc}]
         df = pd.DataFrame(data=d)
-        df.to_csv(path/'accuracies.csv', index=None)
+        df.to_csv(join(path, file_accuracies), index=False)
+
 
 def predict_model(path, timestamp):
     # Opening a saved model
-    centroids = pd.read_csv("../HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids)).to_numpy()
 
-    model = keras.models.load_model(path/"NNMODEL")
+    model = keras.models.load_model(join(sys.path[0], path, folder_name))
 
-    model.predict(transfrom_TimePoint(timestamp))
+    p = model.predict(extract_single(timestamp))
 
+    points = sorted(
+        [{'latitude': lat, 'longitude': long, 'radius': r, 'confidence': conf} for lat, long, r, conf in zip(
+            centroids[:, 0], centroids[:, 1], centroids[:, 2], p.reshape(p.shape[1]))], key=lambda x: x['confidence'],
+        reverse=True)
+
+    return points

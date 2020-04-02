@@ -1,17 +1,12 @@
 import datetime as dt
 import operator
-import sys
 import time
 import tracemalloc
+from os.path import join
 
-import DBSCAN_multiplex
 import hdbscan
-from sklearn.datasets import make_blobs
 from collections import Counter
 import seaborn as sns
-import geoplot as gplt
-import geoplot.crs as gcrs
-import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -23,19 +18,23 @@ from sklearn.cluster import DBSCAN, KMeans, MeanShift, OPTICS, cluster_optics_db
 # Transform normal timestamp to special ml features
 from sklearn.neighbors._ball_tree import BallTree
 
-filename = "extracted_data.csv"
+file_location_history = "history.csv"
+file_extracted_data = "extracted_data.csv"
+file_cluster_centroids = "recycle_bin/HDBSCAN_CLUSTER_CENTROIDS.csv"
+file_accuracies = "accuracies.csv"
 
-def transfrom_X(Time):
-    year, month, day_of_week, hour, minute, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter = ([] for i in
-                                                                                                             range(11))
+
+def extract(Time):
+    month, day_of_week, hour, minute, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter = ([] for i in
+                                                                                                       range(10))
     for stamp in Time:
-        current_date = dt.datetime.utcfromtimestamp(stamp / 1000).strftime("%Y/%m/%d %H:%M")
+        current_date = dt.datetime.utcfromtimestamp(stamp).strftime("%Y/%m/%d %H:%M")
         yymmdd = current_date.split(" ")[0]
         hhmm = current_date.split(" ")[1]
-        year.append(int(yymmdd.split("/")[0]))
+        # year.append(int(yymmdd.split("/")[0]))
         month.append(int(yymmdd.split("/")[1]))
         day_of_week.append(
-            dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(stamp / 1000)) / 7)  # monday - 1 , sunday - 7
+            dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(stamp)) / 7)  # monday - 1 , sunday - 7
         hour.append(int(hhmm.split(":")[0]))
         minute.append(int(hhmm.split(":")[1]))
         (sin, cos) = circular_hour(hour[len(hour) - 1], minute[len(minute) - 1])
@@ -47,28 +46,31 @@ def transfrom_X(Time):
         is_weekend.append(
             1 if (day_of_week[len(day_of_week) - 1] == 5 or day_of_week[len(day_of_week) - 1] == 6) else 0)
         quarter.append(np.ceil(month[len(month) - 1] / 3) / 4)
-    year_min, year_max = year[0], year[len(year) - 1]
-    year = np.array(year)
-    if (year_min == year_max):
-        year = (year - year_min) / year_max
-    else:
-        year = (year - year_min) / (year_max - year_min)
-    return list(zip(year, day_of_week, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter))
+    # year_min, year_max = year[0], year[len(year) - 1]
+    # year = np.array(year)
+    # if (year_min == year_max):
+    #     year = (year - year_min) / year_max
+    # else:
+    #     year = (year - year_min) / (year_max - year_min)
+    return list(zip(day_of_week, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter))
 
-def transfrom_TimePoint(Time):
-    current_date = dt.datetime.utcfromtimestamp(Time / 1000).strftime("%Y/%m/%d %H:%M")
+
+def extract_single(Time):
+    current_date = dt.datetime.utcfromtimestamp(Time).strftime("%Y/%m/%d %H:%M")
     yymmdd = current_date.split(" ")[0]
     hhmm = current_date.split(" ")[1]
     year = int(yymmdd.split("/")[0])
     month = int(yymmdd.split("/")[1])
-    day_of_week = dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(Time/1000)) # monday - 1 , sunday - 7
+    day_of_week = dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(Time)) / 7  # monday - 1 , sunday - 7
     hour = int(hhmm.split(":")[0])
     minute = int(hhmm.split(":")[1])
     (hoursin, hourcos) = circular_hour(hour, minute)
     (monthsin, monthcos) = circular_month(month)
     is_weekend = 1 if (day_of_week == 5 or day_of_week == 6) else 0
-    season = (np.ceil(month / 4))
-    return year, day_of_week, hoursin, hourcos, monthsin, monthcos, is_weekend, season
+    quarter = (np.ceil(month / 3) / 4)
+    arr = np.array(list((day_of_week, hoursin, hourcos, monthsin, monthcos, is_weekend, quarter)))
+    arr = arr.reshape(1, arr.shape[0])
+    return arr
 
 
 def transform_Y(coords):
@@ -82,8 +84,8 @@ def transform_Y(coords):
     clusters = pd.Series([coords[cluster_labels == n] for n in range(num_clusters)])
     print('Number of clusters: {}'.format(num_clusters))
     centermost_points = clusters.map(get_centermost_point)
-    lats, lons = zip(*centermost_points)
-    rep_points = pd.DataFrame({'lat': lats, 'lon': lons})
+    lats, lons, radius = zip(*centermost_points)
+    rep_points = pd.DataFrame({'lat': lats, 'lon': lons, 'radius': radius})
     # all done, print outcome
     message = 'Clustered {:,} points down to {:,} points, for {:.2f}% compression in {:,.2f} seconds.'
     print(message.format(len(coords), len(rep_points), 100 * (1 - float(len(rep_points)) / len(coords)),
@@ -94,7 +96,12 @@ def transform_Y(coords):
 def get_centermost_point(cluster):
     centroid = (MultiPoint(cluster).centroid.x, MultiPoint(cluster).centroid.y)
     centermost_point = min(cluster, key=lambda point: great_circle(point, centroid).m)
-    return tuple(centermost_point)
+    radius = 0.0
+    for point in cluster:
+        rad = great_circle(point, centermost_point).km
+        if rad > radius:
+            radius = rad
+    return tuple(centermost_point) + tuple([radius])
 
 
 def circular_hour(hour, minute):
@@ -106,7 +113,7 @@ def circular_month(month):
     return np.sin(month * 30 * np.pi / 180), np.cos(month * 30 * np.pi / 180)
 
 
-def filter_data(X, y):
+def filter_data(X, y, Time):
     full_size = len(y)
     new_X = []
     new_y = []
@@ -138,11 +145,20 @@ def filter_data(X, y):
     for lon in dict_lon:
         if dict_lon[lon] / full_size > 0.1:
             lon_country.append(lon)
+    travel = 0
+    out_of_country = 0
     for x in range(len(y)):
         if int(y[x, 0]) in lat_country and int(y[x, 1]) in lon_country:
-            new_X.append(X[x])
-            new_y.append(y[x])
+            if x > 0 and great_circle(y[x], y[x - 1]).km / ((Time[x] - Time[x - 1]) / 3600) < 30.0 or x == 0:
+                new_X.append(X[x])
+                new_y.append(y[x])
+            else:
+                travel += 1
+        else:
+            out_of_country += 1
+    print('eliminated ', travel, ' traveling points and', out_of_country, ' out of bounds')
     return np.array(new_X), np.array(new_y)
+
 
 def Balltree_CLUSTER(coords):
     earth_radius = 6371000  # meters in earth
@@ -156,17 +172,20 @@ def Balltree_CLUSTER(coords):
     results = tree.query_radius(test_points, r=test_radius / earth_radius, return_distance=True)
     print(results)
     return results
+
+
 def HDBSCAN_CLUSTER(coords, path):
     tracemalloc.start()
     start_time = time.time()
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=300, min_samples=int(coords.shape[0]/100), algorithm='prims_kdtree', core_dist_n_jobs=-2)
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=300, min_samples=int(coords.shape[0] / 100), algorithm='prims_kdtree',
+                                core_dist_n_jobs=-2, alpha=1.1)
     clusterer.fit(coords)
     labels = clusterer.labels_
     current, peak = tracemalloc.get_traced_memory()
     print(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
     tracemalloc.stop()
     palette = sns.color_palette(n_colors=len(set(clusterer.labels_)))
-    #clusters = pd.Series([coords[cluster_labels == n] for n in range(len(clusterer.labels_))])
+    # clusters = pd.Series([coords[cluster_labels == n] for n in range(len(clusterer.labels_))])
     message = 'Clustered {:,} points down to {:,} points, for {:.2f}% compression in {:,.2f} seconds.'
     print(message.format(len(coords), clusterer.labels_.max() - clusterer.labels_.min() + 1,
                          100 * (1 - float(clusterer.labels_.max() - clusterer.labels_.min() + 1) / len(coords)),
@@ -177,12 +196,11 @@ def HDBSCAN_CLUSTER(coords, path):
     # s = [0.1 if clusterer.labels_[i] == -1 else 25 for i in range(len(clusterer.labels_))]
     # plt.scatter(coords[:, 1], coords[:, 0], c=cluster_colors, s=s)
     # plt.show()
-    num_clusters = len(set(clusterer.labels_))
-    clusters = pd.Series([coords[labels == n] for n in range(num_clusters-1)])
+    num_clusters = len(set(clusterer.labels_)) - 1
+    clusters = pd.Series([coords[labels == n] for n in range(0, num_clusters)])
     centers = clusters.map(get_centermost_point).array
-    centers = np.array([[a[0], a[1]] for a in centers])
-    np.savetxt("HDBSCAN_CLUSTER_CENTROIDS.csv", centers, fmt="%10.8f", delimiter=',')
-    print(centers)
+    centers = np.array([[a[0], a[1], a[2]] for a in centers])
+    np.savetxt(join(path, file_cluster_centroids), centers, fmt="%10.8f", delimiter=',')
     return labels
 
 
@@ -191,13 +209,14 @@ def DBSCAN_CLUSTER(coords):
     tracemalloc.start()
     kms_per_radian = 6371.0088
     epsilon = 0.05 / kms_per_radian
-    db = DBSCAN(eps=epsilon, min_samples=300, algorithm='ball_tree', metric='haversine', n_jobs=-1).fit(np.radians(coords))
+    db = DBSCAN(eps=epsilon, min_samples=300, algorithm='ball_tree', metric='haversine', n_jobs=-1).fit(
+        np.radians(coords))
     current, peak = tracemalloc.get_traced_memory()
     print(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
     tracemalloc.stop()
     cluster_labels = db.labels_
     num_clusters = len(set(cluster_labels))
-    clusters = pd.Series([coords[cluster_labels == n] for n in range(num_clusters-1)])
+    clusters = pd.Series([coords[cluster_labels == n] for n in range(num_clusters - 1)])
     message = 'Clustered {:,} points down to {:,} points, for {:.2f}% compression in {:,.2f} seconds.'
     print(message.format(len(coords), num_clusters, 100 * (1 - float(num_clusters) / len(coords)),
                          time.time() - start_time))
@@ -211,6 +230,8 @@ def DBSCAN_CLUSTER(coords):
     plt.scatter(coords[:, 1], coords[:, 0], c=cluster_colors, s=s)
     plt.show()
     # return num_clusters
+
+
 def OPTICS_CLUSTER(coords):
     tracemalloc.start()
     start_time = time.time()
@@ -220,8 +241,8 @@ def OPTICS_CLUSTER(coords):
     # cluster_method='dbscan', eps=epsilon, max_eps=max_epsilon, metric='haversine', min_samples=2,
     clustering = OPTICS(n_jobs=-1, min_samples=50).fit(coords)
     labels = cluster_optics_dbscan(reachability=clustering.reachability_,
-                                       core_distances=clustering.core_distances_,
-                                       ordering=clustering.ordering_, eps=0.5)
+                                   core_distances=clustering.core_distances_,
+                                   ordering=clustering.ordering_, eps=0.5)
     # labels = clustering.labels_
     current, peak = tracemalloc.get_traced_memory()
     print(f"Current memory usage is {current / 10 ** 6}MB; Peak was {peak / 10 ** 6}MB")
@@ -236,6 +257,7 @@ def OPTICS_CLUSTER(coords):
     centers = np.array([[a[0], a[1]] for a in centers])
     np.savetxt("OPTICS_CLUSTER_CENTROIDS.csv", centers, fmt="%10.8f", delimiter=',')
     print(centers)
+
 
 def GEOHASH_CLUSTER(coords, threshold, precision):
     if 1 < threshold < 0:
@@ -266,7 +288,8 @@ def GEOHASH_CLUSTER(coords, threshold, precision):
                          time.time() - start_time))
     plt.scatter(coords[:, 1], coords[:, 0], c='black', s=2)
     gh.decode(hash_clusters[0])
-    plt.scatter([gh.decode(d)[1] for d in hash_clusters], [gh.decode(d)[0] for d in hash_clusters], marker='s', c='red', s=20, alpha=0.8)
+    plt.scatter([gh.decode(d)[1] for d in hash_clusters], [gh.decode(d)[0] for d in hash_clusters], marker='s', c='red',
+                s=20, alpha=0.8)
     plt.show()
     # return hash_clusters
 
@@ -319,66 +342,46 @@ def kmeans_cluster(coords, k):
     plt.scatter(coords[:, 1], coords[:, 0], s=2, c='black')
     plt.show()
 
+
 def prepare_data(path):
-    data = pd.read_csv("Original_data.csv", sep=",")
+    data = pd.read_csv(join(path, file_location_history), sep=",")
 
-    data = data[["Lat", "Long", "Timestamp"]][-40000:]
+    Time = data['timestamp']
+    coords = np.column_stack([data["latitude"], data["longitude"]])
 
-
-    Time = data['Timestamp']
-    coords = np.column_stack([data["Lat"], data["Long"]])
-    #OPTICS_CLUSTER(coords)
-
-    # for i in range(4):
-    #     print("Number of Data points - ", str(10 ** (i + 2)))
-    #     data = pd.read_csv("Original_data.csv", sep=",", nrows=10 ** (i + 2))
-    #
-    #     data = data[["Lat", "Long", "Timestamp"]]
-    #
-    #     Time = data['Timestamp']
-    #     coords = np.column_stack([data["Lat"], data["Long"]])
-    #     # try:
-    #     #     transform_Y(coords)
-    #     # except Exception as e:
-    #     #     print(e)
-    #     print("-----------------------\nKMeans: ", "k: 5")
-    #     kmeans_cluster(coords, 5)
-    #     #print("-----------------------\nMeanShift: ")
-    #     #CLUSTER_MEANSHIFT(coords)
-    #     print("-----------------------\nGeohash-freq: ", "threshold:0.12, precision:7")
-    #     GEOHASH_CLUSTER(coords, 0.12, 7)
-    #     print("-----------------------\nDBSCAN")
-    #     DBSCAN_CLUSTER(coords)
-    #     print("-----------------------\nHDBSCAN: ")
-    #     HDBSCAN_CLUSTER(coords)
-
-    X_Time = transfrom_X(Time)
-
-
+    X_Time = extract(Time)
     X_Time = np.array(X_Time)
+
     y = np.array(coords)
-    Filtered_X, Filtered_Y = filter_data(X_Time, y)
-    Filtered_X = np.array(Filtered_X)
-    Filtered_Y = np.array(Filtered_Y)
-    label=HDBSCAN_CLUSTER(Filtered_Y, path)
-    Filtered_X = Filtered_X[label != -1]
-    Filtered_Y = Filtered_Y[label != -1]
+
+    filtered_x, filtered_y = filter_data(X_Time, y, Time)
+    filtered_x = np.array(filtered_x)
+    filtered_y = np.array(filtered_y)
+
+    label = HDBSCAN_CLUSTER(filtered_y, path)
+
+    filtered_x = filtered_x[label != -1]
+    filtered_y = filtered_y[label != -1]
     label = label[label != -1]
+
     np.set_printoptions(suppress=True)
-    transformed_data = np.column_stack([Filtered_X, Filtered_Y, label])
-    header_str = "year,day_of_week,hour_sin,hour_cos,month_sin,month_cos,is_weekend,season,lat,long,label"
+    transformed_data = np.column_stack([filtered_x, filtered_y, label])
+    header_str = "day_of_week,hour_sin,hour_cos,month_sin,month_cos,is_weekend,quarter,lat,long,label"
     format_str = []
-    for i in range(transformed_data.shape[1]-1):
+
+    for i in range(transformed_data.shape[1] - 1):
         format_str.append("%10.8f")
+
     format_str.append("%d")
     header_str_arr = header_str.split(',')
     dtype = []
+
     for i in range(len(header_str_arr) - 1):
         dtype.append((header_str_arr[i], float))
     dtype.append((header_str_arr[i + 1], int))
-    ab = np.zeros(Filtered_Y.shape[0], dtype=dtype)
+    ab = np.zeros(filtered_y.shape[0], dtype=dtype)
+
     for i in range(len(header_str_arr)):
         ab[header_str_arr[i]] = transformed_data[:, i]
-    np.savetxt(path/filename, ab, delimiter=',', fmt=format_str, header=header_str, comments='')
 
-
+    np.savetxt(join(path, file_extracted_data), ab, delimiter=',', fmt=format_str, header=header_str, comments='')
