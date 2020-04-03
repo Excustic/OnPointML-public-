@@ -1,9 +1,12 @@
+import asyncio
 import errno
 import json
 import os
 import sys
 import threading
 import time
+
+import requests
 from flask_ngrok import run_with_ngrok
 import pandas as pd
 from flask import Flask, jsonify, request
@@ -29,22 +32,20 @@ def hello():
 
 
 def getHistory(userId):
-    # keys = "?order=start&count=-1"
-    # req = OnPointAPI_URL + getHist + userId + keys
-    # res = await client.get(req)
-    # hist = jsonify(res)
-    file_path = join("users", userId, "history.csv")
-    with open(join(sys.path[0], 'recycle_bin', 'mike_hist.json')) as f:
-        hist = f
-        jtc.convert(hist, file_path)
+    keys = "?order=start&count=-1"
+    req = OnPointAPI_URL + getHist + userId + keys
+    res = requests.get(req)
+    hist = json.dumps(res.json())
+    file_path = join(sys.path[0], "users", userId, "history.csv")
+    jtc.convert(hist, file_path)
 
 
 def user_exists(userId):
     file_dir = join(sys.path[0], "users")
-    if not path.exists(file_dir):
+    if not path.exists(join(file_dir, userId)):
         try:
             os.mkdir(file_dir)
-            file_dir = join(file_dir, "uzi")
+            file_dir = join(file_dir, userId)
             os.mkdir(file_dir)
             getHistory(userId)
         except OSError as exc:
@@ -73,9 +74,9 @@ def setMLurl():
 
 
 @app.route('/user/<string:userId>/predict', methods=['GET', 'POST'])
-def predict(userId, timestamp):
+def predict(userId):
     logging.debug("predict request for user: ", userId)
-    # timestamp = request.args.get('timestamp')
+    timestamp = int(request.args.get('timestamp'))
     file_dir = join(sys.path[0], "users", userId)
     arr = user_exists(userId)
     if not arr[0]:

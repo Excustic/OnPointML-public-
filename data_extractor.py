@@ -20,7 +20,7 @@ from sklearn.neighbors._ball_tree import BallTree
 
 file_location_history = "history.csv"
 file_extracted_data = "extracted_data.csv"
-file_cluster_centroids = "recycle_bin/HDBSCAN_CLUSTER_CENTROIDS.csv"
+file_cluster_centroids = "HDBSCAN_CLUSTER_CENTROIDS.csv"
 file_accuracies = "accuracies.csv"
 
 
