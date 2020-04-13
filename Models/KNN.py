@@ -13,7 +13,7 @@ Model_file_name = "KNNMODEL.pickle"
 
 def train_model(path):
     data = pd.read_csv(join(path, file_extracted_data), sep=",")
-    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids)).to_numpy()
+    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids), sep=",", header=None).to_numpy()
 
     x_time = data[
         ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
@@ -33,7 +33,7 @@ def train_model(path):
 
     try:
         with open(join(sys.path[0], path, file_accuracies), "wb") as f2:
-            df = pd.read_csv(f2, sep=",")
+            df = pd.read_csv(f2)
             df['KNN'] = acc
             df.to_csv(file_accuracies)
     except:
@@ -43,7 +43,7 @@ def train_model(path):
 
 
 def predict_model(path, timestamp):
-    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids)).to_numpy()
+    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids), sep=",", header=None).to_numpy()
     # Load model
     model = pickle.load(open(join(sys.path[0], path, Model_file_name), 'rb'))
     result = model.predict_proba(extract_single(timestamp))

@@ -177,7 +177,7 @@ def Balltree_CLUSTER(coords):
 def HDBSCAN_CLUSTER(coords, path):
     tracemalloc.start()
     start_time = time.time()
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=300, min_samples=int(coords.shape[0] / 100), algorithm='prims_kdtree',
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=500, min_samples=int(coords.shape[0] / 100), algorithm='prims_kdtree',
                                 core_dist_n_jobs=-2, alpha=1.1)
     clusterer.fit(coords)
     labels = clusterer.labels_

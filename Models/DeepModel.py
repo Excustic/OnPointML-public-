@@ -1,7 +1,9 @@
+import sys
+from os.path import join
 import pandas as pd
 import tensorflow as tf
 from keras import Sequential
-from keras.layers import CuDNNLSTM, Dropout, Dense, LSTM
+from keras.layers import Dropout, Dense, LSTM
 from sklearn import preprocessing
 import numpy as np
 from data_extractor import file_extracted_data
@@ -16,12 +18,12 @@ session = tf.compat.v1.Session(config=config)
 tf.compat.v1.keras.backend.set_session(session)
 
 def train_model():
-    centroids = pd.read_csv("HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
+    centroids = pd.read_csv(join("D:\\Work\\PythonML\\OnPoint\\recycle_bin\\HDBSCAN_CLUSTER_CENTROIDS.csv"), sep =",", header=None).to_numpy()
 
-    data = pd.read_csv(file_extracted_data, sep=",")
+    data = pd.read_csv("D:\\Work\\PythonML\\OnPoint\\recycle_bin\\TransformedData.csv", sep=",")
 
     X_Time = data[
-        ["year", "day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "season"]].to_numpy()
+        ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
     y = data[["label"]].to_numpy()
 
     x_train, x_test, y_train, y_test = train_test_split(X_Time, y, test_size=0.1)
@@ -29,23 +31,22 @@ def train_model():
 
     model = Sequential()
 
-    x_train = x_train.reshape(1, x_train.shape[0], x_train.shape[1])
-    x_test = x_test.reshape(1, x_test.shape[0], x_test.shape[1])
-    y_train = y_train.reshape(1, y_train.shape[0], y_test.shape[1])
-    y_test = y_test.reshape(1, y_test.shape[0], y_test.shape[1])
+    x_train = x_train.reshape(x_train.shape[0], 1, x_train.shape[1])
+    x_test = x_test.reshape(x_test.shape[0], 1, x_test.shape[1])
+    # y_train = y_train.reshape(y_train.shape[0])
+    # y_test = y_test.reshape(y_test.shape[0])
 
-    input_shape = (x_train.shape[1:])
 
-    model.add(LSTM(128, input_shape=input_shape, activation='relu', return_sequences=True))
+    model.add(LSTM(128, return_sequences=True))
     model.add(Dropout(0.2))
 
-    model.add(LSTM(128, activation='relu', return_sequences=False))
+    model.add(LSTM(128, return_sequences=False))
     model.add(Dropout(0.2))
 
     model.add(Dense(32, activation='relu'))
     model.add(Dropout(0.2))
 
-    model.add(Dense(y_train.shape[1], activation='softmax'))
+    model.add(Dense(y_train.shape[0], activation='softmax'))
 
     opt = tf.keras.optimizers.Adam(lr=1e-3, decay=1e-5)
 
@@ -60,3 +61,5 @@ def predict_model(path, timestamp):
     centroids = pd.read_csv("HDBSCAN_CLUSTER_CENTROIDS.csv").to_numpy()
 
     print(path, timestamp)
+
+# train_model()

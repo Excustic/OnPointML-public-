@@ -22,7 +22,7 @@ def train_model(path):
     # preparing data for model
 
     data = pd.read_csv(os.path.join(sys.path[0], path, file_extracted_data), sep=",")
-    centroids = pd.read_csv(os.path.join(path, file_cluster_centroids)).to_numpy()
+    centroids = pd.read_csv(os.path.join(path, file_cluster_centroids), sep=",", header=None).to_numpy()
 
     X_Time = data[
         ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
@@ -59,10 +59,9 @@ def train_model(path):
             max_acc = test_acc
             model.save(join(path, folder_name), save_format='tf')
     try:
-        with open(join(sys.path[0], path, file_accuracies), "wb") as f2:
-            df = pd.read_csv(f2, sep=",")
-            df['NN'] = max_acc
-            df.to_csv(join(path, file_accuracies))
+        df = pd.read_csv(join(sys.path[0], path, file_accuracies))
+        df['NN'] = max_acc
+        df.to_csv(join(sys.path[0], path, file_accuracies), index=False)
     except:
         d = [{'NN': max_acc}]
         df = pd.DataFrame(data=d)
@@ -71,7 +70,7 @@ def train_model(path):
 
 def predict_model(path, timestamp):
     # Opening a saved model
-    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids)).to_numpy()
+    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids), sep=",", header=None).to_numpy()
 
     model = keras.models.load_model(join(sys.path[0], path, folder_name))
 
