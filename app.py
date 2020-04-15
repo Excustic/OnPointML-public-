@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+__author__ = "Michael Kushnir"
+__copyright__ = "Copyright 2020, OnPoint Project"
+__credits__ = ["Michael Kushnir"]
+__license__ = "GPL"
+__version__ = "1.0.0"
+__maintainer__ = "Michael Kushnir"
+__email__ = "michaelkushnir123233@gmail.com"
+__status__ = "prototype"
+
 import errno
 import json
 import os
@@ -23,20 +33,41 @@ run_with_ngrok(app)
 ngrok_url = ""
 OnPointAPI_URL = "https://onpoint-backend.herokuapp.com/api/"
 getHist = "locationhistories/getLocationHist/"
+getLength = "locationhistories/ArrayLength/"
 # client = http3.AsyncClient()
 
 @app.route('/index')
 def hello():
     return "OnPoint ML Engine"
 
+def getNewHistory(userId):
+    # prepare count
+    df = pd.read_csv(join(sys.path[0], "users", userId, file_location_history), sep=',', header=None)
+    old_len = len(df.index)
+    new_len = requests.get(OnPointAPI_URL+getLength+userId).text.split(' ')
+    new_len = int(new_len[len(new_len)-1])
+    payload = {"order": "end", "count": str(new_len-old_len)}
+    # call for getHist with count
+    req = OnPointAPI_URL + getHist + userId
+    headers = {'Content-Type': 'application/json'}
+    try:
+        hist = json.dumps(requests.get(req, params=payload, headers=headers, timeout=300, stream=True).json())
+        file_path = join(sys.path[0], "users", userId, file_location_history)
+        jtc.convert(hist, file_path, 'a')
+    except Exception as e:
+        print(e)
+
 def getHistory(userId):
     payload = {"order": "start", "count": '-1'}
     req = OnPointAPI_URL + getHist + userId
     headers = {'Content-Type': 'application/json'}
-    res = requests.get(req, params=payload, headers=headers, timeout=15)
-    with json.dumps(res.json()) as hist:
+    try:
+        hist = json.dumps(requests.get(req, params=payload, headers=headers, timeout=300, stream=True).json())
         file_path = join(sys.path[0], "users", userId, file_location_history)
-        jtc.convert(hist, file_path)
+        jtc.convert(hist, file_path, 'w')
+    except Exception as e:
+        print(e)
+
 
 def update_hist():
     file_dir = join(sys.path[0], "users")
@@ -52,7 +83,7 @@ def update_hist():
 
     users = os.listdir(file_dir)
     for u in users:
-        Thread(target=getHistory, args=(u,)).start()
+        Thread(target=getNewHistory, args=(u,)).start()
 
 def user_exists(userId):
     file_dir = join(sys.path[0], "users")
@@ -100,14 +131,14 @@ def predict(userId):
         # DeepModel.train_model(file_dir)
         NNModel.train_model(file_dir)
     df = pd.read_csv(join(file_dir, file_accuracies))
+    # points = None
     # if df['KNN'] > df['NN'] and df['KNN'] > df['DEEP']:
     #     points = KNN.predict_model(file_dir, timestamp)
     # elif df['NN'] > df['KNN'] and df['NN'] > df['DEEP']:
     #     points = NNModel.predict_model(file_dir, timestamp)
     # else:
-    #     points = DeepModel.predict_model(file_dir, timestamp)
-    points = KNN.predict_model(file_dir, timestamp)
-    res_json = {'userId':userId, 'points':points, 'timestamp':timestamp}
+    points = NNModel.predict_model(file_dir, timestamp)
+    res_json = {'userId': userId, 'points': points, 'timestamp': timestamp}
     print(str(res_json))
     return res_json
 

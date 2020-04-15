@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+__author__ = "Michael Kushnir"
+__copyright__ = "Copyright 2020, OnPoint Project"
+__credits__ = ["Michael Kushnir"]
+__license__ = "GPL"
+__version__ = "1.0.0"
+__maintainer__ = "Michael Kushnir"
+__email__ = "michaelkushnir123233@gmail.com"
+__status__ = "prototype"
+
 import sys
 from os.path import join
 import pandas as pd
@@ -9,6 +19,11 @@ import numpy as np
 from data_extractor import file_extracted_data
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+
+# default naming for model
+folder_name = "DEEPMODEL"
+
+# configurations for the usage gpu_tensorflow
 config = tf.compat.v1.ConfigProto(gpu_options=
                                   tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
                                   # device_count = {'GPU': 1}
@@ -17,9 +32,9 @@ config.gpu_options.allow_growth = True
 session = tf.compat.v1.Session(config=config)
 tf.compat.v1.keras.backend.set_session(session)
 
+# training a Deep Learning model that uses Long Short Term Memory cells
 def train_model():
     centroids = pd.read_csv(join("D:\\Work\\PythonML\\OnPoint\\recycle_bin\\HDBSCAN_CLUSTER_CENTROIDS.csv"), sep =",", header=None).to_numpy()
-
     data = pd.read_csv("D:\\Work\\PythonML\\OnPoint\\recycle_bin\\TransformedData.csv", sep=",")
 
     X_Time = data[
