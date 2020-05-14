@@ -14,18 +14,14 @@ import os
 import sys
 from threading import Thread
 import time
-from urllib.parse import urlparse
-import aiohttp
 import requests
 from flask_ngrok import run_with_ngrok
 import pandas as pd
-from flask import Flask, jsonify, request
+from flask import Flask, request
 from os import path
 from os.path import join
-import logging
-import http3
-import JSONtoCSV as jtc
-from data_extractor import file_extracted_data, file_accuracies, file_location_history,prepare_data
+import json_to_csv as jtc
+from data_extractor import file_extracted_data, file_accuracies, file_location_history, prepare_data
 from Models import DeepModel, NNModel, KNN
 
 app = Flask(__name__)
@@ -34,47 +30,50 @@ ngrok_url = ""
 OnPointAPI_URL = "https://onpoint-backend.herokuapp.com/api/"
 getHist = "locationhistories/getLocationHist/"
 getLength = "locationhistories/ArrayLength/"
-# client = http3.AsyncClient()
+update_threshold = 5000
 
-@app.route('/index')
-def hello():
-    return "OnPoint ML Engine"
 
-def getNewHistory(userId):
+def update_dir(user_id):
     # prepare count
-    df = pd.read_csv(join(sys.path[0], "users", userId, file_location_history), sep=',', header=None)
+    user_dir = join(sys.path[0], "users", user_id)
+    df = pd.read_csv(join(user_dir, file_location_history), sep=',', header=None)
     old_len = len(df.index)
-    new_len = requests.get(OnPointAPI_URL+getLength+userId).text.split(' ')
-    new_len = int(new_len[len(new_len)-1])
-    payload = {"order": "end", "count": str(new_len-old_len)}
-    # call for getHist with count
-    req = OnPointAPI_URL + getHist + userId
-    headers = {'Content-Type': 'application/json'}
-    try:
-        hist = json.dumps(requests.get(req, params=payload, headers=headers, timeout=300, stream=True).json())
-        file_path = join(sys.path[0], "users", userId, file_location_history)
-        jtc.convert(hist, file_path, 'a')
-    except Exception as e:
-        print(e)
+    new_len = requests.get(OnPointAPI_URL + getLength + user_id).text.split(' ')
+    new_len = int(new_len[len(new_len) - 1])
+    if new_len - old_len > update_threshold:
+        payload = {"order": "end", "count": str(new_len - old_len)}
+        # call for getHist with count
+        req = OnPointAPI_URL + getHist + user_id
+        headers = {'Content-Type': 'application/json'}
+        try:
+            hist = json.dumps(requests.get(req, params=payload, headers=headers, timeout=300, stream=True).json())
+            file_path = join(user_dir, file_location_history)
+            jtc.convert(hist, file_path, 'a')
+        except Exception as e:
+            print(e)
+        prepare_data(user_dir)
+        KNN.train_model(user_dir)
+        DeepModel.train_model(user_dir)
+        NNModel.train_model(user_dir)
 
-def getHistory(userId):
+
+def get_history(user_id):
     payload = {"order": "start", "count": '-1'}
-    req = OnPointAPI_URL + getHist + userId
+    req = OnPointAPI_URL + getHist + user_id
     headers = {'Content-Type': 'application/json'}
     try:
         hist = json.dumps(requests.get(req, params=payload, headers=headers, timeout=300, stream=True).json())
-        file_path = join(sys.path[0], "users", userId, file_location_history)
+        file_path = join(sys.path[0], "users", user_id, file_location_history)
         jtc.convert(hist, file_path, 'w')
     except Exception as e:
         print(e)
 
 
-def update_hist():
+def update_users():
     file_dir = join(sys.path[0], "users")
     if not path.exists(file_dir):
         try:
-            if not path.exists(file_dir):
-                os.mkdir(file_dir)
+            os.mkdir(file_dir)
         except OSError as exc:
             if exc.errno != errno.EEXIST:
                 raise
@@ -83,7 +82,8 @@ def update_hist():
 
     users = os.listdir(file_dir)
     for u in users:
-        Thread(target=getNewHistory, args=(u,)).start()
+        Thread(target=update_dir, args=(u,)).start()
+
 
 def user_exists(userId):
     file_dir = join(sys.path[0], "users")
@@ -98,47 +98,50 @@ def user_exists(userId):
                 raise
         else:
             print("Successfully created the directory %s " % file_dir)
-        getHistory(userId)
+        get_history(userId)
         return False, False
     else:
-        return True, path.exists(join(file_dir, file_extracted_data))
+        return True, path.exists(join(file_dir, userId, file_extracted_data))
 
 
-def setMLurl():
-    logging.debug("sending URL")
+def set_ml_url():
+    print("sending URL")
     os.system("curl  http://localhost:4040/api/tunnels > tunnels.json")
-
+    time.sleep(0.1)
     with open('tunnels.json') as data_file:
         data_json = json.load(data_file)
+        if len(data_json['tunnels']) < 1:
+            print(data_json)
+            time.sleep(2)
+            return set_ml_url()
 
     msg = "|"
     for i in data_json['tunnels']:
         msg = msg + i['public_url'] + "|"
-    http3.post(OnPointAPI_URL + "prediction/setMLurl?key=" + str(msg.split("|")[1]))
-    pass
+    print("MLurl: ", msg)
+    return requests.post(OnPointAPI_URL + "prediction/setMLurl?key=" + str(msg.split("|")[1]))
 
 
 @app.route('/user/<string:userId>/predict', methods=['GET', 'POST'])
-def predict(userId):
-    logging.debug("predict request for user: ", userId)
+def predict(user_id):
+    print("predict request for user: ", user_id)
     timestamp = int(request.args.get('timestamp'))
-    file_dir = join(sys.path[0], "users", userId)
-    arr = user_exists(userId)
+    file_dir = join(sys.path[0], "users", user_id)
+    arr = user_exists(user_id)
     if not arr[0]:
         prepare_data(file_dir)
     if not arr[1]:
         KNN.train_model(file_dir)
-        # DeepModel.train_model(file_dir)
+        DeepModel.train_model(file_dir)
         NNModel.train_model(file_dir)
     df = pd.read_csv(join(file_dir, file_accuracies))
-    # points = None
-    # if df['KNN'] > df['NN'] and df['KNN'] > df['DEEP']:
-    #     points = KNN.predict_model(file_dir, timestamp)
-    # elif df['NN'] > df['KNN'] and df['NN'] > df['DEEP']:
-    #     points = NNModel.predict_model(file_dir, timestamp)
-    # else:
-    points = NNModel.predict_model(file_dir, timestamp)
-    res_json = {'userId': userId, 'points': points, 'timestamp': timestamp}
+    if (df['KNN'] > df['NN']).bool() and (df['KNN'] > df['DEEP']).bool():
+        points = KNN.predict_model(file_dir, timestamp)
+    elif (df['NN'] > df['KNN']).bool() & (df['NN'] > df['DEEP']).bool():
+        points = NNModel.predict_model(file_dir, timestamp)
+    else:
+        points = DeepModel.predict_model(file_dir, timestamp)
+    res_json = {'userId': user_id, 'points': points, 'timestamp': timestamp}
     print(str(res_json))
     return res_json
 
@@ -146,10 +149,10 @@ def predict(userId):
 if __name__ == '__main__':
     t = Thread(target=app.run, args=())
     t.start()
-    update_hist()
+    update_users()
     b = False
     while not b:
-        if http3.get("http://localhost:4040").status_code == 200:
+        if requests.get("http://localhost:4040").status_code == 200:
             b = True
-            setMLurl()
-        time.sleep(0.5)
+            set_ml_url()
+        time.sleep(0.8)

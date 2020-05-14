@@ -10,8 +10,11 @@ __status__ = "prototype"
 
 import pandas as pd
 
+
 def convert(json, path, mode):
     df = pd.read_json(json, convert_dates=False, orient='list')
     df = df.drop_duplicates(subset='timestamp')
-    df.to_csv(path, index=None, date_format=None, mode=mode)
-
+    header = True
+    if mode == 'a':
+        header = False
+    df.to_csv(path, index=None, date_format=None, mode=mode, header=header)

@@ -12,9 +12,11 @@ import datetime as dt
 import time
 import tracemalloc
 from os.path import join
+from random import randint
+from threading import Thread
+import folium
 import hdbscan
 import pytz
-import seaborn as sns
 import numpy as np
 import pandas as pd
 from tzwhere import tzwhere
@@ -30,10 +32,10 @@ file_home_cluster = "home_cluster.csv"
 
 
 # extract data features from a timestamp vector
-def extract(Time, timezone):
-    month, day_of_week, hour, minute, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter = ([] for i in
+def extract(data_time, timezone):
+    month, day_of_week, hour, minute, hour_sin, hour_cos, month_sin, month_cos, is_weekend, quarter = ([] for _ in
                                                                                                        range(10))
-    for stamp in Time:
+    for stamp in data_time:
         # convert timestamp to a datetime object
         current_date = dt.datetime.fromtimestamp(stamp, timezone)
 
@@ -56,12 +58,12 @@ def extract(Time, timezone):
 
 
 # extract data features from a single timestamp
-def extract_single(Time, timezone):
+def extract_single(data_time, timezone):
     # convert timestamp to a datetime object
-    current_date = dt.datetime.fromtimestamp(Time, timezone)
+    current_date = dt.datetime.fromtimestamp(data_time, timezone)
 
     month = current_date.month
-    day_of_week = dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(Time)) / 7  # monday - 1 , sunday - 7
+    day_of_week = dt.datetime.isoweekday(dt.datetime.utcfromtimestamp(data_time)) / 7  # monday - 1 , sunday - 7
     hour = current_date.hour
     minute = current_date.minute
     (hoursin, hourcos) = circular_hour(hour, minute)
@@ -81,7 +83,7 @@ def get_centermost_point(cluster):
     # get true centroid
     centroid = (MultiPoint(cluster).centroid.x, MultiPoint(cluster).centroid.y)
     # compare each point to the centroid and retrieve the closest one
-    centermost_point = min(cluster, key=lambda point: great_circle(point, centroid).m)
+    centermost_point = min(cluster, key=lambda mpoint: great_circle(mpoint, centroid).m)
     radius = 0.0
     # find the distance of the farthest point from the centermost_point
     for point in cluster:
@@ -103,11 +105,11 @@ def circular_month(month):
 
 
 # filter unwanted data
-def filter_data(Time, y):
+def filter_data(data_time, y):
     threshold = 0.1  # threshold to cut off data
     maximum_speed = 30.0
     full_size = len(y)
-    new_Time = []
+    new_time = []
     new_y = []
     dict_lat = {}
     dict_lon = {}
@@ -148,8 +150,9 @@ def filter_data(Time, y):
     # filter points that are outside of home country or when user is using a vehicle
     for x in range(len(y)):
         if int(y[x, 0]) in lat_country and int(y[x, 1]) in lon_country:
-            if x > 0 and great_circle(y[x], y[x - 1]).km / ((Time[x] - Time[x - 1]) / 3600) < maximum_speed or x == 0:
-                new_Time.append(Time[x])
+            if x > 0 and great_circle(y[x], y[x - 1]).km / ((data_time[x] - data_time[x - 1]) / 3600) < maximum_speed \
+                    or x == 0:
+                new_time.append(data_time[x])
                 new_y.append(y[x])
             else:
                 travel += 1
@@ -157,11 +160,11 @@ def filter_data(Time, y):
             out_of_country += 1
 
     print('eliminated ', travel, ' traveling points and', out_of_country, ' out of bounds')
-    return np.array(new_Time), np.array(new_y)
+    return np.array(new_time), np.array(new_y)
 
 
 # Hierarchical Density-Based Spatial Clustering of Applications with Noise
-def HDBSCAN_CLUSTER(coords, path):
+def hdbscan_cluster(coords, path):
     # used for benchmarking performance
     tracemalloc.start()
     start_time = time.time()
@@ -187,37 +190,50 @@ def HDBSCAN_CLUSTER(coords, path):
     centers = clusters.map(get_centermost_point).array
     centers = np.array([[a[0], a[1], a[2]] for a in centers])
     cluster_home = centers[max([a] for a in clusters.iteritems())[0][0]]
+    colors = []
+    for i in range(40):
+        colors.append('#%06X' % randint(0, 0xFFFFFF))
+    folium_map = folium.Map(location=[cluster_home[0], cluster_home[1]])
+    c = -1
+    for cluster in clusters:
+        c += 1
+        for point in cluster:
+            folium.CircleMarker(location=point, color=colors[c]).add_to(folium_map)
+    Thread(target=save_map, args=(folium_map, join(path, 'map.html'),)).start()
     np.savetxt(join(path, file_cluster_centroids), centers, fmt="%10.8f", delimiter=',')
     return labels, cluster_home
 
 
+def save_map(folium_map, path):
+    folium_map.save(path)
+
+
 # creates extracted_data.csv, main function
 def prepare_data(path):
-
     # retrieve data and organize to i/o arrays
     data = pd.read_csv(join(path, file_location_history), sep=",")
 
-    Time = data['timestamp']
+    data_time = data['timestamp']
     coords = np.column_stack([data["latitude"], data["longitude"]])
 
     y = np.array(coords)
 
     # filter irrelevant points
-    filtered_x, filtered_y = filter_data(Time, y)
+    filtered_x, filtered_y = filter_data(data_time, y)
     filtered_x = np.array(filtered_x)
     filtered_y = np.array(filtered_y)
 
     # perform clustering
-    label, home = HDBSCAN_CLUSTER(filtered_y, path)
+    label, home = hdbscan_cluster(filtered_y, path)
 
     # extract time features
     tz = tzwhere.tzwhere()
-    timezone_str = pytz.timezone(tz.tzNameAt(home[0], home[1]))
-    X_Time = extract(filtered_x, timezone_str)
-    X_Time = np.array(X_Time)
+    timezone_str = pytz.timezone(tz.tzNameAt(home[0], home[1]))  # get timezone of home cluster
+    x_time = extract(filtered_x, timezone_str)
+    x_time = np.array(x_time)
 
     # filter out noise data that clustering algorithm can't assign to a cluster
-    filtered_x = X_Time[label != -1]
+    filtered_x = x_time[label != -1]
     filtered_y = filtered_y[label != -1]
     label = label[label != -1]
 
@@ -236,14 +252,14 @@ def prepare_data(path):
 
     format_str.append("%d")
     header_str_arr = header_str.split(',')
-    dtype = []
+    dtypes = []
 
     for i in range(len(header_str_arr) - 1):
-        dtype.append((header_str_arr[i], float))
-    dtype.append((header_str_arr[i + 1], int))
-    ab = np.zeros(filtered_y.shape[0], dtype=dtype)
+        dtypes.append((header_str_arr[i], float))
+    dtypes.append((header_str_arr[i + 1], int))
+    final = np.zeros(filtered_y.shape[0], dtype=dtypes)
 
     for i in range(len(header_str_arr)):
-        ab[header_str_arr[i]] = transformed_data[:, i]
+        final[header_str_arr[i]] = transformed_data[:, i]
 
-    np.savetxt(join(path, file_extracted_data), ab, delimiter=',', fmt=format_str, header=header_str, comments='')
+    np.savetxt(join(path, file_extracted_data), final, delimiter=',', fmt=format_str, header=header_str, comments='')

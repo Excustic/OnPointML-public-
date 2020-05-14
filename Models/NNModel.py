@@ -17,7 +17,6 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from tzwhere import tzwhere
-
 from data_extractor import file_extracted_data, extract_single, file_cluster_centroids, file_accuracies, \
     file_home_cluster
 import sys
@@ -26,35 +25,32 @@ import sys
 folder_name = "NNMODEL"
 
 # configurations for the usage gpu_tensorflow
-config = tf.compat.v1.ConfigProto(gpu_options=
-                                  tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
-                                  # device_count = {'GPU': 1}
-                                  )
+config = tf.compat.v1.ConfigProto(gpu_options=tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8))
 config.gpu_options.allow_growth = True
 session = tf.compat.v1.Session(config=config)
 tf.compat.v1.keras.backend.set_session(session)
 
+
 # training a model that uses Neural Networks
 def train_model(path):
-
+    print(folder_name)
     # preparing data for model
-    sessions_count = 4
+    sessions_count = 1
     epochs = 5
     data = pd.read_csv(os.path.join(sys.path[0], path, file_extracted_data), sep=",")
-    centroids = pd.read_csv(os.path.join(path, file_cluster_centroids), sep=",", header=None).to_numpy()
 
-    X_Time = data[
+    x_time = data[
         ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
     y = data[["label"]].to_numpy()
 
-    x_train, x_test, y_train, y_test = train_test_split(X_Time, y, test_size=0.1)
-    print(type(x_train), type(X_Time))
+    x_train, x_test, y_train, y_test = train_test_split(x_time, y, test_size=0.1)
+    print(type(x_train), type(x_time))
     y_train = np.array(y_train)
     y_test = np.array(y_test)
 
-    input_layer_size = X_Time.shape[1]
-    print()
+    input_layer_size = x_time.shape[1]
     output_layer_size = len(list(set(y.flatten())))
+    # rule of thumb for the size of dense layers
     dense_layer_size = int(np.mean([input_layer_size, output_layer_size]))
 
     # Model training and saving
@@ -79,10 +75,11 @@ def train_model(path):
         df = pd.read_csv(join(sys.path[0], path, file_accuracies))
         df['NN'] = max_acc
         df.to_csv(join(sys.path[0], path, file_accuracies), index=False)
-    except:
+    except EnvironmentError:
         d = [{'NN': max_acc}]
         df = pd.DataFrame(data=d)
         df.to_csv(join(path, file_accuracies), index=False)
+    return True
 
 
 def predict_model(path, timestamp):
@@ -99,7 +96,8 @@ def predict_model(path, timestamp):
     p = model.predict(extract_single(timestamp, timezone_str))
 
     points = sorted(
-        [{'latitude': str(lat), 'longitude': str(long), 'radius': str(r), 'confidence': str(conf)} for lat, long, r, conf in zip(
+        [{'latitude': str(lat), 'longitude': str(long), 'radius': str(r), 'confidence': str(conf)} for
+         lat, long, r, conf in zip(
             centroids[:, 0], centroids[:, 1], centroids[:, 2], p.reshape(p.shape[1]))], key=lambda x: x['confidence'],
         reverse=True)
 

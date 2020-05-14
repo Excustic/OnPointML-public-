@@ -8,11 +8,9 @@ __maintainer__ = "Michael Kushnir"
 __email__ = "michaelkushnir123233@gmail.com"
 __status__ = "prototype"
 
-import json
 import numpy as np
 import sys
 from os.path import join
-
 import pytz
 from tzwhere import tzwhere
 from sklearn.neighbors import KNeighborsClassifier
@@ -28,10 +26,10 @@ Model_file_name = "KNNMODEL.pickle"
 
 # training a model that uses K-Nearest Neighbors algorithm
 def train_model(path):
+    print(Model_file_name)
     # preparing data for model
     min_neighbors, max_neighbors = 5, 23
     data = pd.read_csv(join(path, file_extracted_data), sep=",")
-    centroids = pd.read_csv(join(sys.path[0], path, file_cluster_centroids), sep=",", header=None).to_numpy()
 
     x_time = data[
         ["day_of_week", "hour_sin", "hour_cos", "month_sin", "month_cos", "is_weekend", "quarter"]].to_numpy()
@@ -43,7 +41,7 @@ def train_model(path):
 
     # Model training a saving
     max_acc = 0.0
-    for count in range(min_neighbors, max_neighbors, step=2):  # K-Neighbors requires an odd number
+    for count in range(min_neighbors, max_neighbors, 2):  # K-Neighbors requires an odd number
         model = KNeighborsClassifier(n_neighbors=count)
 
         model.fit(x_train, y_train)
@@ -60,10 +58,11 @@ def train_model(path):
             df = pd.read_csv(f2)
             df['KNN'] = max_acc
             df.to_csv(file_accuracies)
-    except:
+    except EnvironmentError:
         d = [{'KNN': max_acc}]
         df = pd.DataFrame(data=d)
         df.to_csv(join(path, file_accuracies), index=False)
+    return True
 
 
 # perform a prediction on a timestamp using the trained model
